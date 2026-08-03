@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Memory Challenge Leaderboard</title>
+<meta name="description" content="See who has the highest score in the Memory Challenge pizza memory game!">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-0: #12131f;
+    --card-back-a: #1e2048;
+    --card-back-b: #2e1a44;
+    --gold: #d9ab52;
+    --accent: #ff6b35;
+    --silver: #c9d0e0;
+    --bronze: #d0895a;
+    --paper: #f5efe0;
+    --muted: #a6a9c8;
+    --score-color: #ffd166;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html {
+    /* honour notch / home-bar on iOS */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+             env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  html, body {
+    min-height: 100vh;
+    background: radial-gradient(ellipse at 50% -10%, #2a1e5c 0%, var(--bg-0) 60%);
+    color: var(--paper);
+    font-family: 'Manrope', sans-serif;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* ══════════════════════════════
+     CONFETTI CANVAS (behind everything)
+  ══════════════════════════════ */
+  #confetti-canvas {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ══════════════════════════════
+     LAYOUT
+  ══════════════════════════════ */
+  .stage {
+    position: relative;
+    z-index: 2;
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 28px 16px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+  }
+
+  /* ══════════════════════════════
+     HEADER
+  ══════════════════════════════ */
+  header {
+    position: relative;
+    text-align: center;
+    margin-bottom: 14px;
+    width: 100%;
+    padding: 0 52px; /* room for back btn */
+  }
+
+  .back-btn {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(217,171,82,0.4);
+    color: var(--gold);
+    font-size: 1.25rem;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    transition: background 0.15s;
+  }
+  .back-btn:active { background: rgba(217,171,82,0.22); }
+
+  .crown {
+    font-size: 1.8rem;
+    display: block;
+    margin-bottom: 4px;
+    animation: crownbounce 2s ease-in-out infinite;
+  }
+
+  @keyframes crownbounce {
+    0%,100% { transform: translateY(0) rotate(-4deg); }
+    50%      { transform: translateY(-5px) rotate(4deg); }
+  }
+
+  h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 700;
+    font-size: clamp(1.15rem, 5.5vw, 2rem);
+    letter-spacing: 0.03em;
+    background: linear-gradient(135deg, #ffe08a 0%, var(--accent) 55%, #c77dff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-transform: uppercase;
+    animation: shimmer 4s ease-in-out infinite;
+    line-height: 1.2;
+  }
+
+  @keyframes shimmer {
+    0%,100% { filter: brightness(1); }
+    50%      { filter: brightness(1.3); }
+  }
+
+  /* ══════════════════════════════
+     SCORING PILLS
+  ══════════════════════════════ */
+  .scoring-info {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .score-pill {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,209,102,0.35);
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: clamp(0.68rem, 2.8vw, 0.8rem);
+    color: var(--score-color);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+
+  /* ══════════════════════════════
+     LEADERBOARD PANEL
+  ══════════════════════════════ */
+  .board-panel {
+    width: 100%;
+    background: linear-gradient(160deg, rgba(30,32,72,0.92), rgba(46,26,68,0.92));
+    border: 1px solid rgba(217,171,82,0.4);
+    border-radius: 20px;
+    padding: 18px 14px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 0 60px rgba(199,125,255,0.12), 0 0 0 1px rgba(255,255,255,0.04);
+  }
+
+  .lb-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    /* allow scroll on very small phones */
+    max-height: 58vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-right: 2px;
+  }
+
+  /* ── Rows ── */
+  .lb-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 12px 14px;
+  }
+
+  .lb-row.top1 {
+    background: linear-gradient(135deg, rgba(217,171,82,0.22), rgba(255,209,102,0.06));
+    border-color: var(--gold);
+    box-shadow: 0 0 22px rgba(217,171,82,0.35);
+  }
+  .lb-row.top2 {
+    background: linear-gradient(135deg, rgba(201,208,224,0.16), rgba(201,208,224,0.04));
+    border-color: var(--silver);
+    box-shadow: 0 0 14px rgba(201,208,224,0.28);
+  }
+  .lb-row.top3 {
+    background: linear-gradient(135deg, rgba(208,137,90,0.18), rgba(208,137,90,0.04));
+    border-color: var(--bronze);
+    box-shadow: 0 0 14px rgba(208,137,90,0.26);
+  }
+  .lb-row.empty {
+    justify-content: center;
+    color: var(--muted);
+    font-size: 0.88rem;
+    border-style: dashed;
+    padding: 20px 14px;
+  }
+
+  .lb-rank {
+    width: 32px;
+    text-align: center;
+    font-family: 'Fraunces', serif;
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .top1 .lb-rank, .top2 .lb-rank, .top3 .lb-rank { font-size: 1.4rem; }
+
+  .lb-info { flex: 1; min-width: 0; }
+
+  .lb-name {
+    font-weight: 700;
+    font-size: clamp(0.88rem, 3.5vw, 1rem);
+    color: var(--paper);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .lb-meta {
+    font-size: clamp(0.68rem, 2.5vw, 0.75rem);
+    color: var(--muted);
+    margin-top: 1px;
+  }
+
+  .lb-score {
+    font-family: 'Fraunces', serif;
+    font-weight: 700;
+    font-size: clamp(1rem, 4vw, 1.25rem);
+    color: var(--score-color);
+    white-space: nowrap;
+    text-shadow: 0 0 10px rgba(255,209,102,0.38);
+  }
+  .top1 .lb-score {
+    background: linear-gradient(135deg, #ffe08a, #ff9d4d);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* ── Clear button ── */
+  .clear-link {
+    display: block;
+    margin: 16px auto 0;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-family: 'Manrope', sans-serif;
+    font-size: 0.78rem;
+    text-decoration: underline;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    padding: 6px 0; /* bigger tap target */
+  }
+  .clear-link:active { color: var(--paper); }
+
+  /* ══════════════════════════════
+     STAR SPARKLES
+  ══════════════════════════════ */
+  .sparkle {
+    position: fixed;
+    pointer-events: none;
+    font-size: 1rem;
+    opacity: 0;
+    z-index: 1;
+    animation: sparkleAnim linear infinite;
+  }
+
+  @keyframes sparkleAnim {
+    0%   { opacity: 0; transform: translateY(0) scale(0.5) rotate(0deg); }
+    20%  { opacity: 1; }
+    80%  { opacity: 0.55; }
+    100% { opacity: 0; transform: translateY(-70px) scale(1.2) rotate(360deg); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .crown, h1, .sparkle { animation: none !important; }
+    #confetti-canvas { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="confetti-canvas"></canvas>
+
+<div class="stage">
+  <header>
+    <a class="back-btn" href="lantern-match.html" title="Back to game">←</a>
+    <span class="crown">👑</span>
+    <h1>Memory Challenge Leaderboard</h1>
+  </header>
+
+  <div class="scoring-info">
+    <span class="score-pill">✅ Match = <strong>+100 pts</strong></span>
+    <span class="score-pill">🔥 3-in-a-row = <strong>+500 pts</strong></span>
+    <span class="score-pill">🏆 Highest wins</span>
+  </div>
+
+  <div class="board-panel">
+    <ol class="lb-list" id="lbList"></ol>
+    <button class="clear-link" id="clearBtn">Clear leaderboard</button>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════
+   CONFETTI — fires UPWARD from the bottom
+══════════════════════════════════════════════ */
+(function () {
+  const canvas = document.getElementById('confetti-canvas');
+  const ctx    = canvas.getContext('2d');
+
+  const COLORS = [
+    '#ff6b35','#ffd166','#6ee7b7','#c77dff',
+    '#ff9f1c','#4cc9f0','#f72585','#ffbe0b','#06d6a0'
+  ];
+
+  let pieces = [];
+  let W, H;
+
+  function resize() {
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  /* Spawn pieces rising from the bottom */
+  function spawnBurst(count) {
+    for (let i = 0; i < count; i++) {
+      /* spread across the full width, cluster toward centre for burst feel */
+      const xCenter = W * (0.2 + Math.random() * 0.6);
+      pieces.push({
+        x:     xCenter + (Math.random() - 0.5) * W * 0.5,
+        y:     H + 10 + Math.random() * 30,          // start below viewport
+        vx:    (Math.random() - 0.5) * 5,
+        vy:    -(6 + Math.random() * 8),              // shoot upward
+        size:  5 + Math.random() * 9,
+        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+        angle: Math.random() * Math.PI * 2,
+        spin:  (Math.random() - 0.5) * 0.22,
+        shape: Math.random() < 0.5 ? 'rect' : 'circle',
+        life:  1,
+        decay: 0.006 + Math.random() * 0.005          // fade out as they travel
+      });
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    pieces.forEach((p) => {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle);
+      ctx.fillStyle = p.color;
+      if (p.shape === 'rect') {
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      } else {
+        ctx.beginPath();
+        ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    });
+  }
+
+  function update() {
+    pieces = pieces.filter(p => p.life > 0 && p.y > -60);
+    pieces.forEach((p) => {
+      p.x     += p.vx;
+      p.y     += p.vy;
+      p.angle += p.spin;
+      p.vy    += 0.18;          // gravity pulls them back down
+      p.vx    *= 0.98;
+      p.life  -= p.decay;
+    });
+  }
+
+  function loop() { update(); draw(); requestAnimationFrame(loop); }
+
+  /* big pop on load, then gentle trickle */
+  spawnBurst(140);
+  setTimeout(() => spawnBurst(80), 600);
+  setInterval(() => spawnBurst(18), 2200);
+
+  loop();
+})();
+
+/* ══════════════════════════════════════════════
+   SPARKLE STARS
+══════════════════════════════════════════════ */
+(function () {
+  const STARS = ['⭐','✨','🌟','💫'];
+  for (let i = 0; i < 8; i++) {
+    const s = document.createElement('div');
+    s.className = 'sparkle';
+    s.textContent = STARS[i % STARS.length];
+    s.style.left              = (5 + Math.random() * 90) + '%';
+    s.style.top               = (10 + Math.random() * 80) + '%';
+    s.style.animationDuration = (4 + Math.random() * 5) + 's';
+    s.style.animationDelay    = (Math.random() * 4) + 's';
+    document.body.appendChild(s);
+  }
+})();
+
+/* ══════════════════════════════════════════════
+   LEADERBOARD LOGIC
+══════════════════════════════════════════════ */
+(function () {
+  const lbList   = document.getElementById('lbList');
+  const clearBtn = document.getElementById('clearBtn');
+
+  const MEDALS    = { 0: '🥇', 1: '🥈', 2: '🥉' };
+  const TOP_CLASS = { 0: 'top1', 1: 'top2', 2: 'top3' };
+
+  function formatTime(s) {
+    const m   = Math.floor(s / 60).toString().padStart(2, '0');
+    const sec = (s % 60).toString().padStart(2, '0');
+    return `${m}:${sec}`;
+  }
+
+  function getScores(key) {
+    try { return JSON.parse(localStorage.getItem('memoryScores_' + key)) || []; }
+    catch (e) { return []; }
+  }
+
+  function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function render() {
+    const scores = getScores('medium');
+    lbList.innerHTML = '';
+
+    if (scores.length === 0) {
+      const li = document.createElement('li');
+      li.className = 'lb-row empty';
+      li.textContent = 'No scores yet — be the first to play! 🍕';
+      lbList.appendChild(li);
+      return;
+    }
+
+    scores.forEach((entry, i) => {
+      const li = document.createElement('li');
+      li.className = 'lb-row' + (TOP_CLASS[i] ? ' ' + TOP_CLASS[i] : '');
+      const rankLabel = MEDALS[i] !== undefined ? MEDALS[i] : (i + 1);
+      li.innerHTML = `
+        <span class="lb-rank">${rankLabel}</span>
+        <span class="lb-info">
+          <div class="lb-name">${escapeHtml(entry.name)}</div>
+          <div class="lb-meta">${entry.moves} moves · ${formatTime(entry.seconds)}</div>
+        </span>
+        <span class="lb-score">${entry.score ?? 0} pts</span>
+      `;
+      lbList.appendChild(li);
+    });
+  }
+
+  clearBtn.addEventListener('click', () => {
+    if (confirm('Clear all scores? This cannot be undone.')) {
+      localStorage.removeItem('memoryScores_medium');
+      render();
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
