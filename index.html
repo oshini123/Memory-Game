@@ -530,16 +530,19 @@
     streakTimer = setTimeout(() => streakBanner.classList.remove('show'), 2200);
   }
 
-  /* ── Local storage ── */
-  function getScores(key) {
-    try { return JSON.parse(localStorage.getItem('memoryScores_' + key)) || []; }
-    catch (e) { return []; }
-  }
+  /* ── Save score: Firebase (shared) + localStorage (fallback) ── */
   function saveScoreToBoard(key, entry) {
-    const scores = getScores(key);
-    scores.push(entry);
-    scores.sort((a, b) => b.score - a.score || a.seconds - b.seconds);
-    localStorage.setItem('memoryScores_' + key, JSON.stringify(scores));
+    // Push to Firebase so all devices see it
+    if (typeof window.firebaseSaveScore === 'function') {
+      window.firebaseSaveScore(entry);
+    }
+    // Also save locally so the player can see it even offline
+    try {
+      const scores = JSON.parse(localStorage.getItem('memoryScores_' + key)) || [];
+      scores.push(entry);
+      scores.sort((a, b) => b.score - a.score || a.seconds - b.seconds);
+      localStorage.setItem('memoryScores_' + key, JSON.stringify(scores));
+    } catch (e) { /* ignore */ }
   }
 
   /* ── Build board ── */
@@ -666,6 +669,35 @@
 
   buildBoard();
 })();
+</script>
+<!-- Firebase: push score to shared Realtime Database -->
+<script type="module">
+  import { initializeApp }        from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+  import { getDatabase, ref, push } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
+
+  const firebaseConfig = {
+    apiKey:            "AIzaSyDTHb7X6tE3yLFIr7BiKKNfiM8KQNGKHHg",
+    authDomain:        "memory-challenge-9cfa8.firebaseapp.com",
+    databaseURL:       "https://memory-challenge-9cfa8-default-rtdb.firebaseio.com",
+    projectId:         "memory-challenge-9cfa8",
+    storageBucket:     "memory-challenge-9cfa8.firebasestorage.app",
+    messagingSenderId: "761387825435",
+    appId:             "1:761387825435:web:3dc674f9885a99165dfbbe"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db  = getDatabase(app);
+
+  /* Exposed globally so the game IIFE can call it */
+  window.firebaseSaveScore = function (entry) {
+    push(ref(db, 'scores'), {
+      name:      entry.name,
+      score:     entry.score,
+      moves:     entry.moves,
+      seconds:   entry.seconds,
+      timestamp: Date.now()
+    }).catch(err => console.warn('Firebase write failed:', err));
+  };
 </script>
 </body>
 </html>

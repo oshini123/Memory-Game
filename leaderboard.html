@@ -186,6 +186,35 @@
     margin-bottom: clamp(10px, 2vw, 16px);
     letter-spacing: 0.05em;
     text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  /* live pulse dot */
+  .live-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4cde80;
+    box-shadow: 0 0 6px #4cde80;
+    animation: livepulse 1.4s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes livepulse {
+    0%,100% { transform: scale(1);   opacity: 1; }
+    50%      { transform: scale(1.5); opacity: 0.5; }
+  }
+
+  .live-label {
+    font-family: 'Manrope', sans-serif;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    color: #4cde80;
+    text-transform: uppercase;
   }
 
   .lb-list {
@@ -428,7 +457,11 @@
 
     <!-- LEFT — leaderboard -->
     <div class="lb-panel">
-      <div class="lb-panel-title">🏅 Top Players</div>
+      <div class="lb-panel-title">
+        🏅 Top Players
+        <span class="live-dot"></span>
+        <span class="live-label">Live</span>
+      </div>
       <ol class="lb-list" id="lbList"></ol>
       <button class="clear-link" id="clearBtn">Clear leaderboard</button>
     </div>
@@ -449,139 +482,100 @@
 
 </div><!-- /page -->
 
-<script>
-/* ── CONFETTI — fires upward from bottom ── */
-(function () {
-  const canvas = document.getElementById('confetti-canvas');
-  const ctx    = canvas.getContext('2d');
-  const COLORS = ['#ff6b35','#ffd166','#6ee7b7','#c77dff','#ff9f1c','#4cc9f0','#f72585','#ffbe0b','#06d6a0'];
-  let pieces = [], W, H;
+<script type="module">
+/* ════════════════════════════════════════════════
+   FIREBASE — real-time leaderboard
+════════════════════════════════════════════════ */
+import { initializeApp }                          from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getDatabase, ref, onValue, query,
+         orderByChild, limitToLast, remove }      from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
-  function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
-  resize();
-  window.addEventListener('resize', resize);
+const firebaseConfig = {
+  apiKey:            "AIzaSyDTHb7X6tE3yLFIr7BiKKNfiM8KQNGKHHg",
+  authDomain:        "memory-challenge-9cfa8.firebaseapp.com",
+  databaseURL:       "https://memory-challenge-9cfa8-default-rtdb.firebaseio.com",
+  projectId:         "memory-challenge-9cfa8",
+  storageBucket:     "memory-challenge-9cfa8.firebasestorage.app",
+  messagingSenderId: "761387825435",
+  appId:             "1:761387825435:web:3dc674f9885a99165dfbbe"
+};
 
-  function spawnBurst(count) {
-    for (let i = 0; i < count; i++) {
-      const xCenter = W * (0.2 + Math.random() * 0.6);
-      pieces.push({
-        x: xCenter + (Math.random() - 0.5) * W * 0.5,
-        y: H + 10 + Math.random() * 30,
-        vx: (Math.random() - 0.5) * 5,
-        vy: -(6 + Math.random() * 8),
-        size: 5 + Math.random() * 9,
-        color: COLORS[Math.floor(Math.random() * COLORS.length)],
-        angle: Math.random() * Math.PI * 2,
-        spin: (Math.random() - 0.5) * 0.22,
-        shape: Math.random() < 0.5 ? 'rect' : 'circle',
-        life: 1,
-        decay: 0.006 + Math.random() * 0.005
-      });
-    }
+const app      = initializeApp(firebaseConfig);
+const db       = getDatabase(app);
+const lbList   = document.getElementById('lbList');
+const clearBtn = document.getElementById('clearBtn');
+
+const MEDALS    = { 0: '🥇', 1: '🥈', 2: '🥉' };
+const TOP_CLASS = { 0: 'top1', 1: 'top2', 2: 'top3' };
+
+function fmt(s) {
+  return `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
+}
+
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+/* Real-time listener — fires immediately on load,
+   then again every time any score changes in Firebase */
+const scoresQuery = query(
+  ref(db, 'scores'),
+  orderByChild('score'),
+  limitToLast(50)           // pull top 50, we'll slice to 10 in JS
+);
+
+onValue(scoresQuery, (snapshot) => {
+  lbList.innerHTML = '';
+  const data = snapshot.val();
+
+  if (!data) {
+    const li = document.createElement('li');
+    li.className    = 'lb-row empty';
+    li.textContent  = 'No scores yet — scan the QR to play! 🍕';
+    lbList.appendChild(li);
+    return;
   }
 
-  function draw() {
-    ctx.clearRect(0, 0, W, H);
-    pieces.forEach(p => {
-      ctx.save();
-      ctx.globalAlpha = Math.max(0, p.life);
-      ctx.translate(p.x, p.y);
-      ctx.rotate(p.angle);
-      ctx.fillStyle = p.color;
-      if (p.shape === 'rect') ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
-      else { ctx.beginPath(); ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2); ctx.fill(); }
-      ctx.restore();
-    });
-  }
+  // Firebase returns ordered ascending; reverse + take top 10
+  const scores = Object.values(data)
+    .sort((a, b) => b.score - a.score || a.seconds - b.seconds)
+    .slice(0, 10);
 
-  function update() {
-    pieces = pieces.filter(p => p.life > 0 && p.y > -60);
-    pieces.forEach(p => { p.x += p.vx; p.y += p.vy; p.angle += p.spin; p.vy += 0.18; p.vx *= 0.98; p.life -= p.decay; });
-  }
-
-  function loop() { update(); draw(); requestAnimationFrame(loop); }
-
-  spawnBurst(140);
-  setTimeout(() => spawnBurst(80), 600);
-  setInterval(() => spawnBurst(18), 2200);
-  loop();
-})();
-
-/* ── SPARKLE STARS ── */
-(function () {
-  const STARS = ['⭐','✨','🌟','💫'];
-  for (let i = 0; i < 8; i++) {
-    const s = document.createElement('div');
-    s.className = 'sparkle';
-    s.textContent = STARS[i % STARS.length];
-    s.style.left              = (5 + Math.random() * 90) + '%';
-    s.style.top               = (10 + Math.random() * 80) + '%';
-    s.style.animationDuration = (4 + Math.random() * 5) + 's';
-    s.style.animationDelay    = (Math.random() * 4) + 's';
-    document.body.appendChild(s);
-  }
-})();
-
-/* ── LEADERBOARD LOGIC ── */
-(function () {
-  const lbList   = document.getElementById('lbList');
-  const clearBtn = document.getElementById('clearBtn');
-
-  const MEDALS    = { 0: '🥇', 1: '🥈', 2: '🥉' };
-  const TOP_CLASS = { 0: 'top1', 1: 'top2', 2: 'top3' };
-
-  function fmt(s) {
-    return `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
-  }
-
-  function getScores(key) {
-    try { return JSON.parse(localStorage.getItem('memoryScores_' + key)) || []; }
-    catch (e) { return []; }
-  }
-
-  function esc(str) {
-    const d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
-  }
-
-  function render() {
-    const scores = getScores('medium').slice(0, 10); // top 10 only
-    lbList.innerHTML = '';
-
-    if (scores.length === 0) {
-      const li = document.createElement('li');
-      li.className = 'lb-row empty';
-      li.textContent = 'No scores yet — scan the QR to play! 🍕';
-      lbList.appendChild(li);
-      return;
-    }
-
-    scores.forEach((entry, i) => {
-      const li = document.createElement('li');
-      li.className = 'lb-row' + (TOP_CLASS[i] ? ' ' + TOP_CLASS[i] : '');
-      const rank = MEDALS[i] !== undefined ? MEDALS[i] : (i + 1);
-      li.innerHTML = `
-        <span class="lb-rank">${rank}</span>
-        <span class="lb-info">
-          <div class="lb-name">${esc(entry.name)}</div>
-          <div class="lb-meta">${entry.moves} moves · ${fmt(entry.seconds)}</div>
-        </span>
-        <span class="lb-score">${entry.score ?? 0} pts</span>
-      `;
-      lbList.appendChild(li);
-    });
-  }
-
-  clearBtn.addEventListener('click', () => {
-    if (confirm('Clear all scores? This cannot be undone.')) {
-      localStorage.removeItem('memoryScores_medium');
-      render();
-    }
+  scores.forEach((entry, i) => {
+    const li      = document.createElement('li');
+    li.className  = 'lb-row' + (TOP_CLASS[i] ? ' ' + TOP_CLASS[i] : '');
+    const rank    = MEDALS[i] !== undefined ? MEDALS[i] : (i + 1);
+    li.innerHTML  = `
+      <span class="lb-rank">${rank}</span>
+      <span class="lb-info">
+        <div class="lb-name">${esc(entry.name)}</div>
+        <div class="lb-meta">${entry.moves} moves · ${fmt(entry.seconds)}</div>
+      </span>
+      <span class="lb-score">${entry.score ?? 0} pts</span>
+    `;
+    lbList.appendChild(li);
   });
+}, (error) => {
+  /* show connection error in the list */
+  lbList.innerHTML = '';
+  const li = document.createElement('li');
+  li.className   = 'lb-row empty';
+  li.textContent = '⚠️ Could not connect to Firebase. Check your internet.';
+  lbList.appendChild(li);
+  console.error('Firebase read error:', error);
+});
 
-  render();
-})();
+/* Clear all scores from Firebase */
+clearBtn.addEventListener('click', () => {
+  if (confirm('Clear ALL scores for everyone? This cannot be undone.')) {
+    remove(ref(db, 'scores'))
+      .then(() => console.log('Scores cleared.'))
+      .catch(err => alert('Could not clear: ' + err.message));
+  }
+});
+
 </script>
 </body>
 </html>
