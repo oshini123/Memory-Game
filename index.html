@@ -405,8 +405,9 @@
 <div class="stage">
   <header>
     <a class="trophy-btn" href="leaderboard.html" title="View leaderboard">🏆</a>
-    <h1>Memory Challenge</h1>
-    <p class="tagline">Find all matching pairs!</p>
+    <img id="brand-logo" src="" alt="Brand Logo" style="height:36px;object-fit:contain;display:none;margin:0 auto 6px;" />
+    <h1 id="game-headline">Memory Challenge</h1>
+    <p class="tagline" id="game-tagline">Find all matching pairs!</p>
   </header>
 
   <div class="stats">
@@ -432,7 +433,7 @@
 <!-- Win overlay -->
 <div class="overlay" id="overlay">
   <div class="overlay-card">
-    <h2>🎉 You Win!</h2>
+    <h2 id="win-message">🎉 You Win!</h2>
     <p>All pairs matched!</p>
     <span class="score-label">Your Score</span>
     <span class="score-highlight" id="finalScore">0</span>
@@ -468,8 +469,13 @@
 
 <script>
 (function () {
-  // 6 pizza-themed icons — 4×3 grid (12 cards, 6 pairs)
-  const ICONS = ['🍕', '🥤', '🛵', '🧀', '🔥', '💵'];
+  // ─────────────────────────────────────────────────────────────
+  // FanForge Config API — fetch brand tile config dynamically
+  // ─────────────────────────────────────────────────────────────
+  const FANFORGE_API = 'https://engagements-production.up.railway.app';
+
+  // Fallback pizza-themed icons if no brand config is set
+  const DEFAULT_ICONS = ['🍕', '🥤', '🛵', '🧀', '🔥', '💵'];
 
   const boardEl               = document.getElementById('board');
   const movesEl               = document.getElementById('moves');
@@ -485,16 +491,17 @@
   const savedOverlay          = document.getElementById('savedOverlay');
   const playAgainFromSavedBtn = document.getElementById('playAgainFromSaved');
   const streakBanner          = document.getElementById('streakBanner');
+  const headlineEl            = document.getElementById('game-headline');
+  const taglineEl             = document.getElementById('game-tagline');
+  const winMessageEl          = document.getElementById('win-message');
 
-  // 4 columns × 3 rows = 12 cards = 6 pairs
-  const COLS        = 4;
-  const ROWS        = 3;
-  const TOTAL_PAIRS = (COLS * ROWS) / 2;
-
+  // Game state
   let deck = [], flipped = [], matchedCount = 0;
   let moves = 0, score = 0, streak = 0;
   let timerId = null, seconds = 0;
   let lockBoard = false, started = false, streakTimer = null;
+  let TILE_POOL = []; // Active tile pool (from config or defaults)
+  let COLS = 4, ROWS = 3;
 
   const POINTS_PER_MATCH = 100;
   const STREAK_THRESHOLD = 3;
@@ -530,19 +537,64 @@
     streakTimer = setTimeout(() => streakBanner.classList.remove('show'), 2200);
   }
 
-  /* ── Save score: Firebase (shared) + localStorage (fallback) ── */
-  function saveScoreToBoard(key, entry) {
-    // Push to Firebase so all devices see it
-    if (typeof window.firebaseSaveScore === 'function') {
-      window.firebaseSaveScore(entry);
+  /* ── Apply brand config ── */
+  function applyConfig(config) {
+    if (!config) return;
+
+    // Apply colors
+    if (config.backgroundColor) {
+      document.body.style.background = config.backgroundColor;
+      document.documentElement.style.setProperty('--bg-0', config.backgroundColor);
     }
-    // Also save locally so the player can see it even offline
-    try {
-      const scores = JSON.parse(localStorage.getItem('memoryScores_' + key)) || [];
-      scores.push(entry);
-      scores.sort((a, b) => b.score - a.score || a.seconds - b.seconds);
-      localStorage.setItem('memoryScores_' + key, JSON.stringify(scores));
-    } catch (e) { /* ignore */ }
+    if (config.accentColor) {
+      document.documentElement.style.setProperty('--accent', config.accentColor);
+    }
+    if (config.brandColor) {
+      document.documentElement.style.setProperty('--gold', config.brandColor);
+      document.documentElement.style.setProperty('--score-color', config.brandColor);
+    }
+
+    // Apply text
+    if (headlineEl && config.headline) headlineEl.textContent = config.headline;
+    if (taglineEl && config.tagline) taglineEl.textContent = config.tagline;
+    if (winMessageEl && config.rewardText) winMessageEl.textContent = config.rewardText;
+
+    // Apply brand logo
+    const logoEl = document.getElementById('brand-logo');
+    if (logoEl) {
+      if (config.brandLogo) {
+        logoEl.src = config.brandLogo;
+        logoEl.style.display = 'block';
+      } else {
+        logoEl.style.display = 'none';
+      }
+    }
+
+    // Apply grid size
+    if (config.gridCols) COLS = config.gridCols;
+    if (config.gridRows) ROWS = config.gridRows;
+    if (boardEl) {
+      boardEl.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
+    }
+
+    // Extract tile pool from config
+    if (config.tiles && config.tiles.length > 0) {
+      TILE_POOL = config.tiles;
+    } else {
+      TILE_POOL = DEFAULT_ICONS.map((em, i) => ({
+        id: `default-${i}`, label: em, content: em, type: 'emoji', imageUrl: '', backColor: i % 2 === 0 ? '#232a52' : '#3a2350'
+      }));
+    }
+
+    buildBoard();
+  }
+
+  /* ── Build card face HTML ── */
+  function buildCardFace(tile) {
+    if (tile.type === 'image' && tile.imageUrl) {
+      return `<img src="${tile.imageUrl}" alt="${tile.label || ''}" style="width:80%;height:80%;object-fit:contain;border-radius:8px;" />`;
+    }
+    return `<span style="font-size:clamp(1.5rem,6vw,2.6rem)">${tile.content || '?'}</span>`;
   }
 
   /* ── Build board ── */
@@ -557,21 +609,33 @@
     overlayEl.classList.remove('show');
     streakBanner.classList.remove('show');
 
-    const chosen = shuffle(ICONS.slice()).slice(0, TOTAL_PAIRS);
+    const TOTAL_PAIRS = Math.floor((COLS * ROWS) / 2);
+
+    // Pick from tile pool (cycle if not enough tiles)
+    const pool = TILE_POOL.length > 0 ? TILE_POOL : DEFAULT_ICONS.map((em, i) => ({
+      id: `d${i}`, content: em, type: 'emoji', imageUrl: '', backColor: '#232a52'
+    }));
+
+    const chosen = [];
+    for (let i = 0; i < TOTAL_PAIRS; i++) {
+      chosen.push(pool[i % pool.length]);
+    }
     deck = shuffle([...chosen, ...chosen]);
 
     boardEl.innerHTML = '';
 
-    deck.forEach((icon) => {
+    deck.forEach((tile) => {
       const card = document.createElement('div');
       card.className    = 'card';
-      card.dataset.icon = icon;
+      card.dataset.icon = tile.id || tile.content || tile.imageUrl;
       card.innerHTML = `
-        <div class="card-face back">
+        <div class="card-face back" style="background:linear-gradient(160deg, ${tile.backColor || '#232a52'}, ${tile.backColor ? tile.backColor + 'aa' : '#3a2350'})">
           <span class="q-mark">?</span>
           <div class="q-dots"><span></span><span></span><span></span></div>
         </div>
-        <div class="card-face front">${icon}</div>
+        <div class="card-face front" style="background:#f5efe0;display:flex;align-items:center;justify-content:center;">
+          ${buildCardFace(tile)}
+        </div>
       `;
       card.addEventListener('click', () => onCardClick(card));
       boardEl.appendChild(card);
@@ -604,6 +668,7 @@
       streak++;
       score += POINTS_PER_MATCH;
 
+      const TOTAL_PAIRS = Math.floor((COLS * ROWS) / 2);
       if (streak > 0 && streak % STREAK_THRESHOLD === 0) {
         score += STREAK_BONUS;
         showStreakBanner();
@@ -635,6 +700,19 @@
     }
   }
 
+  /* ── Save score: Firebase (shared) + localStorage (fallback) ── */
+  function saveScoreToBoard(key, entry) {
+    if (typeof window.firebaseSaveScore === 'function') {
+      window.firebaseSaveScore(entry);
+    }
+    try {
+      const scores = JSON.parse(localStorage.getItem('memoryScores_' + key)) || [];
+      scores.push(entry);
+      scores.sort((a, b) => b.score - a.score || a.seconds - b.seconds);
+      localStorage.setItem('memoryScores_' + key, JSON.stringify(scores));
+    } catch (e) {}
+  }
+
   /* ── Button listeners ── */
   saveScoreBtn.addEventListener('click', () => {
     const name = playerNameInput.value.trim() || 'Anonymous';
@@ -653,7 +731,7 @@
     buildBoard();
   });
 
-  /* ── Ambient pizza particles ── */
+  /* ── Ambient particles (use tile content or defaults) ── */
   const particlesEl = document.getElementById('particles');
   const PART_ICONS  = ['🍕', '🧀', '🔥', '🍕', '🥤', '🍕'];
   for (let i = 0; i < 6; i++) {
@@ -667,7 +745,46 @@
     particlesEl.appendChild(p);
   }
 
-  buildBoard();
+  // ─────────────────────────────────────────────────────────────
+  // 1. FETCH CONFIG FROM FANFORGE API ON LOAD
+  // ─────────────────────────────────────────────────────────────
+  fetch(`${FANFORGE_API}/api/game-config/memory-challenge`)
+    .then((r) => r.json())
+    .then((config) => {
+      applyConfig(config);
+    })
+    .catch(() => {
+      // API unreachable — use defaults
+      TILE_POOL = DEFAULT_ICONS.map((em, i) => ({
+        id: `default-${i}`, content: em, type: 'emoji', imageUrl: '', backColor: i % 2 === 0 ? '#232a52' : '#3a2350'
+      }));
+      buildBoard();
+    });
+
+  // ─────────────────────────────────────────────────────────────
+  // 2. WEBSOCKET — Live config hot-reload without page refresh
+  // ─────────────────────────────────────────────────────────────
+  function connectWS() {
+    try {
+      const ws = new WebSocket(`${FANFORGE_API.replace(/^http/, 'ws')}/ws`);
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'CONFIG_UPDATED' && msg.game === 'memory-challenge') {
+            applyConfig(msg.config);
+          }
+        } catch (e) {}
+      };
+
+      ws.onclose = () => {
+        // Auto-reconnect after 3s
+        setTimeout(connectWS, 3000);
+      };
+    } catch (e) {}
+  }
+  connectWS();
+
 })();
 </script>
 <!-- Firebase: push score to shared Realtime Database -->
@@ -701,3 +818,4 @@
 </script>
 </body>
 </html>
+
