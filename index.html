@@ -310,8 +310,21 @@
     font-size: clamp(1.8rem, 8vw, 2.4rem);
     font-weight: 700;
     color: var(--score-color);
-    margin: 0 0 16px;
+    margin: 0 0 4px;
     display: block;
+  }
+
+  .mult-badge {
+    display: inline-block;
+    font-family: 'Fraunces', serif;
+    font-size: clamp(0.95rem, 3.5vw, 1.1rem);
+    font-weight: 700;
+    color: var(--jade);
+    background: rgba(110,231,183,0.12);
+    border: 1px solid rgba(110,231,183,0.35);
+    border-radius: 999px;
+    padding: 3px 14px;
+    margin-bottom: 14px;
   }
 
   .score-label {
@@ -424,6 +437,7 @@
       <span class="stat-value" id="time">00:00</span>
     </div>
   </div>
+  <span id="multiplier" style="display:none"></span>
 
   <div class="streak-banner" id="streakBanner">🔥 3-in-a-row! +500 Bonus!</div>
 
@@ -437,6 +451,7 @@
     <p>All pairs matched!</p>
     <span class="score-label">Your Score</span>
     <span class="score-highlight" id="finalScore">0</span>
+    <span class="mult-badge" id="finalMult">⚡ 1.0× Time Multiplier</span>
     <div class="overlay-stats">
       <div>
         <span class="stat-label">Moves</span>
@@ -507,6 +522,31 @@
   const STREAK_THRESHOLD = 3;
   const STREAK_BONUS     = 500;
 
+  // ── Time multiplier: 3.0× at ≤30 s, scales linearly to 1.0× at 180 s+
+  const MULT_MAX_SECS = 30;   // full multiplier below this
+  const MULT_MIN_SECS = 180;  // multiplier bottoms out here
+  const MULT_MAX      = 3.0;
+  const MULT_MIN      = 1.0;
+
+  const multiplierEl = document.getElementById('multiplier');
+  const finalMultEl  = document.getElementById('finalMult');
+
+  function getTimeMultiplier(s) {
+    if (s <= MULT_MAX_SECS) return MULT_MAX;
+    if (s >= MULT_MIN_SECS) return MULT_MIN;
+    // Linear interpolation between max and min
+    const t = (s - MULT_MAX_SECS) / (MULT_MIN_SECS - MULT_MAX_SECS);
+    return Math.round((MULT_MAX - t * (MULT_MAX - MULT_MIN)) * 10) / 10;
+  }
+
+  function updateLiveMultiplier() {
+    const m = getTimeMultiplier(seconds);
+    multiplierEl.textContent = m.toFixed(1) + '×';
+    // Flash the badge briefly to draw attention when it changes
+    multiplierEl.classList.add('pop');
+    setTimeout(() => multiplierEl.classList.remove('pop'), 200);
+  }
+
   /* ── Utilities ── */
   function shuffle(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
@@ -525,7 +565,12 @@
     if (timerId) clearInterval(timerId);
     seconds = 0;
     timeEl.textContent = fmt(0);
-    timerId = setInterval(() => { seconds++; timeEl.textContent = fmt(seconds); }, 1000);
+    multiplierEl.textContent = MULT_MAX.toFixed(1) + '×';
+    timerId = setInterval(() => {
+      seconds++;
+      timeEl.textContent = fmt(seconds);
+      updateLiveMultiplier();
+    }, 1000);
   }
   function stopTimer() { clearInterval(timerId); timerId = null; }
 
@@ -603,9 +648,10 @@
     started = false; moves = 0; score = 0; streak = 0;
     matchedCount = 0; flipped = []; lockBoard = false;
 
-    movesEl.textContent = '0';
-    scoreEl.textContent = '0';
-    timeEl.textContent  = '00:00';
+    movesEl.textContent      = '0';
+    scoreEl.textContent      = '0';
+    timeEl.textContent       = '00:00';
+    multiplierEl.textContent = MULT_MAX.toFixed(1) + '×';
     overlayEl.classList.remove('show');
     streakBanner.classList.remove('show');
 
@@ -679,10 +725,21 @@
 
       if (matchedCount === TOTAL_PAIRS) {
         stopTimer();
+        const multiplier  = getTimeMultiplier(seconds);
+        const finalScore  = Math.round(score * multiplier);
+        score = finalScore; // persist final (multiplied) score for saving
+
         finalMovesEl.textContent = moves;
         finalTimeEl.textContent  = fmt(seconds);
-        finalScoreEl.textContent = score;
-        playerNameInput.value    = '';
+        finalScoreEl.textContent = finalScore.toLocaleString();
+        scoreEl.textContent      = finalScore.toLocaleString();
+
+        // Update overlay multiplier badge
+        const multLabel = multiplier === MULT_MAX ? '🚀' : multiplier === MULT_MIN ? '⏱️' : '⚡';
+        finalMultEl.textContent  = `${multLabel} ${multiplier.toFixed(1)}× Time Multiplier`;
+        multiplierEl.textContent = multiplier.toFixed(1) + '×';
+
+        playerNameInput.value = '';
         setTimeout(() => {
           overlayEl.classList.add('show');
           playerNameInput.focus();
